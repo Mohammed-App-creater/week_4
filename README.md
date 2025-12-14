@@ -47,3 +47,36 @@ In a regulated financial environment, the choice between a simple model (e.g., L
     ```bash
     pip install -r requirements.txt
     ```
+
+## deployment
+
+### Docker (Recommended)
+
+To run the API in a containerized environment (ensures reproducibility):
+
+1.  **Build and Run**:
+    ```bash
+    docker-compose up --build
+    ```
+    The API will be available at `http://localhost:8000`.
+
+2.  **Test the API**:
+    Visit `http://localhost:8000/docs` for the interactive Swagger UI, or run:
+    ```bash
+    curl http://localhost:8000/health
+    ```
+
+### Local Development
+
+1.  **Train the Model**:
+    The training pipeline is defined in `src/models/train_model.py`.
+    ```bash
+    python src/models/train_model.py
+    ```
+    This will save the trained model to `src/models/model.pkl`.
+
+2.  **Run the API**:
+    ```bash
+    uvicorn src.app:app --reload
+    ```
+
