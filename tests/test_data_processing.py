@@ -1,3 +1,10 @@
+"""
+Unit Tests for Data Processing and Feature Engineering.
+
+These tests validate that raw transaction data is correctly aggregated into 
+customer profiles and that secondary features (temporal, WoE) are extracted 
+accurately for the ML pipeline.
+"""
 
 import pytest
 import pandas as pd
@@ -12,6 +19,9 @@ from sklearn.pipeline import Pipeline
 
 @pytest.fixture
 def sample_transaction_data():
+    """
+    Provides a standardized transaction-level dataset for testing.
+    """
     data = {
         'CustomerId': ['C1', 'C1', 'C2', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8'],
         'Amount': [100.0, 200.0, 50.0, 150.0, 300.0, 120.0, 80.0, 250.0, 50.0, 400.0],
@@ -29,21 +39,30 @@ def sample_transaction_data():
     return pd.DataFrame(data)
 
 def test_generate_customer_features(sample_transaction_data):
+    """
+    Verifies the aggregation logic from transactions to customer profiles.
+    
+    Business Relevance: Accurate aggregation is the foundation of behavioral 
+    credit scoring.
+    """
     customer_features = generate_customer_features(sample_transaction_data)
     
-    assert len(customer_features) == 8 # C1 to C8
+    assert len(customer_features) == 8 # Unique count of C1 to C8
     assert 'total_transaction_amount' in customer_features.columns
     assert 'avg_transaction_amount' in customer_features.columns
     assert 'transaction_count' in customer_features.columns
     assert 'std_transaction_amount' in customer_features.columns
     
-    # Check specific values for CustomerId C1
+    # Check specific values for CustomerId C1 to ensure sum/count/mean are correct
     c1 = customer_features[customer_features['CustomerId'] == 'C1'].iloc[0]
     assert c1['total_transaction_amount'] == 300.0
     assert c1['transaction_count'] == 2
     assert c1['avg_transaction_amount'] == 150.0
 
 def test_temporal_feature_extractor(sample_transaction_data):
+    """
+    Ensures datetime strings are correctly decomposed into temporal components.
+    """
     extractor = TemporalFeatureExtractor()
     transformed_df = extractor.transform(sample_transaction_data)
     
@@ -53,29 +72,34 @@ def test_temporal_feature_extractor(sample_transaction_data):
     assert 'transaction_year' in transformed_df.columns
     assert 'TransactionStartTime' not in transformed_df.columns
     
-    # Check hour for first row
+    # Check hour for first row (10:00:00)
     assert transformed_df.iloc[0]['transaction_hour'] == 10
 
 def test_build_feature_pipeline(sample_transaction_data):
+    """
+    Tests the integration of OHE and Scaling within the unified pipeline.
+    """
     categorical = ['ProductCategory', 'ChannelId']
     numerical = ['Amount']
     
     pipeline = build_feature_pipeline(categorical, numerical)
     assert isinstance(pipeline, Pipeline)
     
-    # Fit and transform
+    # Fit and transform to check output dimensionality
     transformed = pipeline.fit_transform(sample_transaction_data)
     
-    # 1 numerical + 3 unique categories for ProductCategory (A, B, C) + 2 for ChannelId (1, 2)
-    # Total cols = 1 + 3 + 2 = 6
+    # Calculation: 1 numeric + OHE(3 categories for Prod + 2 for Channel) = 6
     assert transformed.shape[1] == 6
 
 def test_apply_woe_transformation(sample_transaction_data):
-    # This test might fail if xverse is not installed, but let's assume it is or will be.
-    try:
-        df_woe, iv_table = apply_woe_transformation(sample_transaction_data, 'is_high_risk')
-        assert isinstance(df_woe, pd.DataFrame)
-        assert isinstance(iv_table, pd.DataFrame)
-        assert 'is_high_risk' not in df_woe.columns
-    except ImportError:
-        pytest.skip("xverse not installed")
+    """
+    Validates the Weight of Evidence (WoE) and Information Value (IV) calculation.
+    
+    Regulatory Note: WoE transformations must be deterministic and statistically 
+    valid for banking model approval.
+    """
+    df_woe, iv_table = apply_woe_transformation(sample_transaction_data, 'is_high_risk')
+    assert isinstance(df_woe, pd.DataFrame)
+    assert isinstance(iv_table, pd.DataFrame)
+    # The target should be excluded from the feature set
+    assert 'is_high_risk' not in df_woe.columns

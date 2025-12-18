@@ -1,3 +1,11 @@
+"""
+FastAPI Service for Real-Time Credit Scoring.
+
+This module implements a containerized REST API that serves the registered 
+CreditRiskModel. It provides endpoints for health monitoring and risk 
+prediction, converting model probabilities into business-friendly credit scores.
+"""
+
 import logging
 import os
 import pandas as pd
@@ -6,58 +14,71 @@ from fastapi import FastAPI, HTTPException
 import mlflow.sklearn
 from src.api.pydantic_models import PredictionRequest, PredictionResponse, HealthResponse
 
-# Configure logging
+# Configure logging to track API initialization and prediction events
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Credit Risk Scoring API",
-    description="API for predicting credit risk and generating credit scores.",
+    description="A production-ready API for predicting credit risk likelihood and generating behavioral credit scores for BNPL customers.",
     version="1.0.0"
 )
 
-# Global variable for the model
+# Global variable to hold the model in memory for fast inference
 model = None
 MODEL_NAME = "CreditRiskModel"
 
 def transform_probability_to_score(probability: float) -> int:
     """
-    Maps probability (0-1) to credit score (300-850).
-    score = 850 - (probability * 550)
+    Maps a risk probability (0-1) to a standard Credit Score scale (300-850).
+    
+    The transformation logic follows an inverse relationship: 
+    Higher probability of default leads to a lower credit score.
+    Formula: score = 850 - (probability * 550)
+
+    Args:
+        probability (float): Model output (0.0 to 1.0).
+
+    Returns:
+        int: Scaled credit score between 300 and 850.
     """
     score = 850 - (probability * 550)
-    # Clamp between 300 and 850
+    # Clamping ensures the score stays within the standard industry range
     return int(max(300, min(850, score)))
 
 @app.on_event("startup")
 def load_model():
     """
-    Load the latest production model from MLflow.
+    Initializes the API by loading the latest production model from MLflow.
+    
+    This occurs at startup to ensure that the first prediction request 
+    does not suffer from 'cold start' latency.
     """
     global model
     try:
-        # MLflow tracking URI can be set via MLFLOW_TRACKING_URI env var
+        # Configuration via environment variables for cloud/docker flexibility
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
         mlflow.set_tracking_uri(tracking_uri)
         
         logger.info(f"Loading latest version of model '{MODEL_NAME}' from {tracking_uri}...")
         
-        # Load the model from model registry
-        # We assume the model is registered as 'CreditRiskModel'
+        # Pull the latest model version registered under the designated name
         model_uri = f"models:/{MODEL_NAME}/latest"
         model = mlflow.sklearn.load_model(model_uri)
         
-        logger.info("Successfully loaded model.")
+        logger.info("Successfully loaded model artifact.")
     except Exception as e:
         logger.error(f"Failed to load model from MLflow: {e}")
-        # In a real production scenario, you might want to retry or fail hard
-        # For now, we'll log the error and requests will fail with 503
+        # In production, this might trigger an alert to the SRE team
         model = None
 
 @app.get("/health", response_model=HealthResponse)
 def health_check():
     """
-    Health check endpoint.
+    Performs a system health check.
+    
+    Returns:
+        HealthResponse: Status ('healthy' or 'unhealthy') and model availability.
     """
     if model is None:
         return HealthResponse(status="unhealthy", model_version=None)
@@ -66,24 +87,35 @@ def health_check():
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
     """
-    Predict credit risk for a given customer.
+    Predicts credit risk and generates a score for a given customer profile.
+    
+    The endpoint orchestrates:
+    1. Data validation via Pydantic.
+    2. Feature formatting for the ML pipeline.
+    3. Probability estimation.
+    4. Score transformation and risk labeling.
+
+    Args:
+        request (PredictionRequest): Aggregated customer transaction features.
+
+    Returns:
+        PredictionResponse: Risk probability, credit score, and categorical label.
     """
     if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(status_code=503, detail="Model artifact is not available on the server.")
 
     try:
-        # Convert request to DataFrame (the model expects a DataFrame if it was trained on one)
-        input_data = pd.DataFrame([request.dict()])
+        # Convert Pydantic model to DataFrame - the ML pipeline expects structured data
+        input_data = pd.DataFrame([request.model_dump()])
         
-        # Predict probability
-        # Assuming the model has predict_proba
+        # Execute the full ML pipeline (imputation -> scaling -> encoding -> prediction)
         probabilities = model.predict_proba(input_data)
         risk_probability = float(probabilities[0][1])
         
-        # Transform to score
+        # Business logic transformation
         credit_score = transform_probability_to_score(risk_probability)
         
-        # Assign label
+        # Risk thresholds can be adjusted based on the bank's risk appetite
         risk_label = "HIGH_RISK" if risk_probability >= 0.5 else "LOW_RISK"
         
         return PredictionResponse(
@@ -92,9 +124,10 @@ async def predict(request: PredictionRequest):
             risk_label=risk_label
         )
     except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error during prediction: {str(e)}")
+        logger.error(f"Prediction logic failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error during inference: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
+    # Local development entry point
     uvicorn.run(app, host="0.0.0.0", port=8000)

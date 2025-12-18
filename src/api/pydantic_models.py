@@ -1,13 +1,26 @@
+"""
+Data Validation Models for the Credit Risk API.
+
+This module defines the Pydantic schemas for request and response validation, 
+ensuring type safety and providing documentation for the API's data contracts.
+"""
+
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 
 class PredictionRequest(BaseModel):
-    total_transaction_amount: float = Field(..., description="Sum of all transaction amounts for the customer")
-    avg_transaction_amount: float = Field(..., description="Mean transaction amount")
-    transaction_count: int = Field(..., gt=0, description="Total number of transactions")
-    std_transaction_amount: float = Field(0.0, description="Standard deviation of transaction amounts")
+    """
+    Schema for customer risk prediction requests.
+    
+    Requires customer-level aggregated transaction features which serve 
+    as the primary predictors of creditworthiness.
+    """
+    total_transaction_amount: float = Field(..., description="Total cumulative transaction volume for the customer.")
+    avg_transaction_amount: float = Field(..., description="The mathematical mean of all customer transactions.")
+    transaction_count: int = Field(..., gt=0, description="Total number of completed transactions (must be > 0).")
+    std_transaction_amount: float = Field(0.0, description="Measure of spending volatility (standard deviation of amounts).")
 
-    # Pydantic v2 style configuration
+    # Metadata for API documentation and automated testing
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -20,11 +33,15 @@ class PredictionRequest(BaseModel):
     )
 
 class PredictionResponse(BaseModel):
-    risk_probability: float = Field(..., ge=0, le=1)
-    credit_score: int = Field(..., ge=300, le=850)
-    risk_label: str = Field(..., pattern="^(HIGH_RISK|LOW_RISK)$")
+    """
+    Schema for risk prediction results.
+    
+    Returns the raw probability and its derived business metrics.
+    """
+    risk_probability: float = Field(..., ge=0, le=1, description="Probability of default (0.0 to 1.0).")
+    credit_score: int = Field(..., ge=300, le=850, description="Scaled credit score following standard industry ranges.")
+    risk_label: str = Field(..., pattern="^(HIGH_RISK|LOW_RISK)$", description="Categorical risk classification.")
 
-    # Pydantic v2 style configuration
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -36,8 +53,10 @@ class PredictionResponse(BaseModel):
     )
 
 class HealthResponse(BaseModel):
-    status: str
-    model_version: Optional[str] = None
+    """
+    Schema for API health check status.
+    """
+    status: str = Field(..., description="Current server health status.")
+    model_version: Optional[str] = Field(None, description="The version of the ML model currently loaded in memory.")
     
-    # Optional: Add ConfigDict if you need any configuration
     model_config = ConfigDict()
