@@ -5,5 +5,7 @@ services:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=./mlruns
     volumes:
-      - ./src/models:/app/src/models # Persist trained models
+      - .:/app

@@ -6,4 +6,8 @@ scikit-learn
 jupyter
 fastapi
 uvicorn
+mlflow
+pydantic
 joblib
+pytest
+flake8
